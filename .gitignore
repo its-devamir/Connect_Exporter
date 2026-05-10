@@ -11,6 +11,8 @@ env/
 build/
 dist/
 release/
+*.spec
+ConnectExporter-win64.zip
 
 # Outputs
 *.mp4
