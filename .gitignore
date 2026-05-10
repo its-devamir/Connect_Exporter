@@ -1,0 +1,35 @@
+# Cache / virtualenv
+.replay_cache/
+__pycache__/
+*.py[cod]
+.venv/
+venv/
+env/
+.env
+
+# Build / release artifacts
+build/
+dist/
+release/
+
+# Outputs
+*.mp4
+*.mp4.partial.mp4
+*.zip
+
+# Adobe Connect exports (very large; keep out of repo by default)
+*.flv
+mainstream.xml
+indexstream.xml
+transcriptstream.xml
+ftchat*.xml
+ftcontent*.xml
+ftstage*.xml
+sco_metadata.xml
+document-metadata.xml
+telephony-files.xml
+
+# OS/editor
+.DS_Store
+Thumbs.db
+.vscode/

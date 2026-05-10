@@ -1,0 +1,351 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Connect Exporter</title>
+    <link rel="stylesheet" href="/static/styles.css" />
+  </head>
+  <body>
+    <div class="wrap">
+      <header class="header">
+        <div>
+          <div class="title">Adobe Connect Exporter</div>
+          <div class="subtitle">Paste a session URL, download the ZIP, upload it, tune settings, watch progress.</div>
+        </div>
+        <div class="headerRight">
+          <div class="badge" id="serverBadge">Server • …</div>
+          <div class="badge subtle" id="preflightBadge">Session: not verified</div>
+        </div>
+      </header>
+
+      <div id="toast" class="toast" role="status" aria-live="polite" hidden></div>
+
+      <nav class="wizardNav" aria-label="Export steps">
+        <button type="button" class="wizStep active" id="wizTab1" data-step="1">
+          <span class="wizN">1</span><span class="wizT">Download</span>
+        </button>
+        <span class="wizJoin" aria-hidden="true"></span>
+        <button type="button" class="wizStep" id="wizTab2" data-step="2" disabled>
+          <span class="wizN">2</span><span class="wizT">Upload</span>
+        </button>
+        <span class="wizJoin" aria-hidden="true"></span>
+        <button type="button" class="wizStep" id="wizTab3" data-step="3" disabled>
+          <span class="wizN">3</span><span class="wizT">Settings</span>
+        </button>
+        <span class="wizJoin" aria-hidden="true"></span>
+        <button type="button" class="wizStep" id="wizTab4" data-step="4" disabled>
+          <span class="wizN">4</span><span class="wizT">Export</span>
+        </button>
+      </nav>
+
+      <!-- —— Step 1: download —— -->
+      <div id="panel1" class="wizardPanel">
+        <section class="card pickCard">
+          <h2 class="wizHeading">Get the Connect export ZIP</h2>
+          <p class="mutedP" style="margin-top: 6px">
+            Paste the Connect session link. We’ll generate the ZIP download URL for you. Open it in your browser (it
+            will use your login), then come back and upload the ZIP.
+          </p>
+          <label class="field span2" style="margin-top: 12px">
+            <div class="labelRow"><span class="label">Session URL</span></div>
+            <input id="sessionUrl" class="input" spellcheck="false" placeholder="https://live3.usc.ac.ir/pvu4ggslzs98/?session=..." />
+          </label>
+          <div class="downloadBox">
+            <div class="downloadLabel">Download URL</div>
+            <div class="downloadRow">
+              <input id="zipUrl" class="input mono" spellcheck="false" readonly value="—" />
+              <button type="button" class="btn" id="btnCopyZipUrl" disabled>Copy</button>
+              <a class="btn primary" id="btnOpenZipUrl" href="#" target="_blank" rel="noreferrer" aria-disabled="true">Open</a>
+            </div>
+            <p class="mutedP" style="margin-top: 10px">
+              If this opens a login page, sign in, then refresh the tab and try again.
+            </p>
+          </div>
+          <div class="wizActions">
+            <button type="button" class="btn primary" id="btnToUpload" disabled>I already downloaded →</button>
+          </div>
+        </section>
+      </div>
+
+      <!-- —— Step 2: upload —— -->
+      <div id="panel2" class="wizardPanel" hidden>
+        <section class="card pickCard">
+          <h2 class="wizHeading">Upload the ZIP (or folder)</h2>
+          <div id="dropZone" class="dropHero" tabindex="0" role="region" aria-label="Drop recording files">
+            <div class="dropIcon" aria-hidden="true">⬆</div>
+            <div class="dropTitle">Drag &amp; drop here</div>
+            <div class="dropSub">Adobe Connect export <strong>.zip</strong> or a <strong>folder</strong> from File Explorer</div>
+            <div class="dropActions">
+              <button type="button" class="btn primary" id="pickZipBtn">Choose .zip…</button>
+              <button type="button" class="btn" id="pickFolderBtn">Choose folder…</button>
+            </div>
+            <input type="file" id="fileZipInput" accept=".zip,application/zip,application/x-zip-compressed" hidden />
+            <input type="file" id="fileFolderInput" webkitdirectory directory multiple hidden />
+          </div>
+
+          <input type="hidden" id="folder" value="" autocomplete="off" />
+
+          <details class="manualPath" id="manualPathBox">
+            <summary>Instead, paste a path on this PC (server reads disk — no upload)</summary>
+            <p class="manualHint">
+              Only when this web UI runs on the <strong>same computer</strong> as the recording (or path to a
+              <code>.zip</code>).
+            </p>
+            <textarea
+              id="manualFolder"
+              class="input manualTextarea"
+              rows="2"
+              spellcheck="false"
+              placeholder="C:\\Users\\me\\Downloads\\meeting-export.zip"
+            ></textarea>
+            <div class="row pickRow">
+              <button type="button" class="btn" id="btnPastePath">Paste</button>
+            </div>
+          </details>
+
+          <p id="pickStatus" class="pickStatus mono" hidden></p>
+
+          <div class="wizActions">
+            <button type="button" class="btn ghost" id="btnBackToDownload">← Back</button>
+            <button type="button" class="btn primary" id="btnToSettings" disabled>Next: Settings →</button>
+          </div>
+        </section>
+      </div>
+
+      <!-- —— Step 3: settings —— -->
+      <div id="panel3" class="wizardPanel" hidden>
+        <div class="sessionBar">
+          <div class="sessionBarText">
+            <div class="sessionLabel">Recording</div>
+            <div id="sessionPathDisplay" class="mono sessionPath">—</div>
+          </div>
+          <button type="button" class="btn ghost" id="btnReplaceSession">← Change recording</button>
+        </div>
+        <p class="miniDropHint">You can go back and upload a different ZIP/folder if needed.</p>
+
+        <section class="card">
+          <h2 class="wizHeading">Your system</h2>
+          <p class="mutedP">Used to warn when settings may be heavy for this machine.</p>
+          <div id="systemInfo" class="systemGrid mono">Loading…</div>
+        </section>
+
+        <section class="card">
+          <h2 class="wizHeading">Rough estimates</h2>
+          <p class="mutedP">Updates when you change settings (ballpark encode time &amp; MP4 size).</p>
+          <div id="estimateBox" class="estimateStrip">
+            <div class="esti"><span class="estiLab">Workload</span><span id="estLoad">—</span></div>
+            <div class="esti"><span class="estiLab">Encode (~)</span><span id="estEnc">—</span></div>
+            <div class="esti"><span class="estiLab">Total (~)</span><span id="estTot">—</span></div>
+            <div class="esti"><span class="estiLab">File size (~)</span><span id="estMb">—</span></div>
+          </div>
+          <div id="warningsBox" class="warningsBox" hidden></div>
+          <button type="button" class="linkbtn" id="btnPreflight">Recalculate estimates</button>
+          <details class="detailRaw" style="margin-top: 12px">
+            <summary>Show session details JSON</summary>
+            <pre id="preflight" class="pre raw"></pre>
+          </details>
+        </section>
+
+        <section class="card">
+          <h2 class="wizHeading">Quality presets</h2>
+          <div class="row presets">
+            <button type="button" class="btn preset" data-preset="fast" id="presetFast">Fast preview</button>
+            <button type="button" class="btn preset" data-preset="balanced" id="presetBalanced">Balanced</button>
+            <button type="button" class="btn preset" data-preset="quality" id="presetQuality">High quality</button>
+          </div>
+        </section>
+
+        <section class="card">
+          <h2 class="wizHeading">Export options</h2>
+          <div class="grid">
+            <label class="field span2">
+              <div class="labelRow">
+                <span class="label">Output file name</span>
+                <button type="button" class="hintBtn" popovertarget="hint-out" aria-label="Help: output file">?</button>
+              </div>
+              <input id="out" class="input" value="replay.mp4" />
+            </label>
+
+            <label class="field span2">
+              <div class="labelRow">
+                <span class="label">Save to folder (optional)</span>
+                <button type="button" class="hintBtn" popovertarget="hint-outdir" aria-label="Help: output folder">?</button>
+              </div>
+              <input
+                id="outDir"
+                class="input"
+                spellcheck="false"
+                placeholder="Leave blank for default — or paste e.g. C:\Users\me\Videos\Exports"
+              />
+            </label>
+
+            <label class="field span2">
+              <div class="labelRow">
+                <span class="label">Video size</span>
+                <button type="button" class="hintBtn" popovertarget="hint-res" aria-label="Help: resolution">?</button>
+              </div>
+              <select id="resolutionPreset" class="input">
+                <option value="1080">Full HD — 1920 × 1080</option>
+                <option value="720" selected>HD — 1280 × 720</option>
+                <option value="480">SD — 854 × 480</option>
+                <option value="360">Small — 640 × 360</option>
+                <option value="240">Tiny — 426 × 240</option>
+                <option value="custom">Custom width × height…</option>
+              </select>
+              <div id="customResRow" class="row martop" hidden>
+                <input id="w" class="input small" value="1280" aria-label="Width" />
+                <span class="sep">×</span>
+                <input id="h" class="input small" value="720" aria-label="Height" />
+              </div>
+            </label>
+
+            <label class="field">
+              <div class="labelRow">
+                <span class="label">FPS</span>
+                <button type="button" class="hintBtn" popovertarget="hint-fps" aria-label="Help: FPS">?</button>
+              </div>
+              <input id="fps" class="input small" value="15" />
+            </label>
+
+            <label class="field">
+              <div class="labelRow">
+                <span class="label">Quality (CRF / CQ)</span>
+                <button type="button" class="hintBtn" popovertarget="hint-crf" aria-label="Help: quality">?</button>
+              </div>
+              <input id="crf" class="input small" value="30" />
+            </label>
+
+            <label class="field">
+              <div class="labelRow">
+                <span class="label">Encoder speed preset</span>
+                <button type="button" class="hintBtn" popovertarget="hint-spreset" aria-label="Help: encoder preset">?</button>
+              </div>
+              <select id="preset" class="input">
+                <option>ultrafast</option>
+                <option>superfast</option>
+                <option>veryfast</option>
+                <option>faster</option>
+                <option>fast</option>
+                <option>medium</option>
+              </select>
+            </label>
+
+            <label class="field">
+              <div class="labelRow">
+                <span class="label">Hardware encoder</span>
+                <button type="button" class="hintBtn" popovertarget="hint-enc" aria-label="Help: encoder">?</button>
+              </div>
+              <select id="encoder" class="input">
+                <option value="auto">Auto (prefer NVIDIA)</option>
+                <option value="h264_nvenc">GPU — h264_nvenc</option>
+                <option value="libx264">CPU — libx264</option>
+              </select>
+              <div id="encoderInfo" class="encHint mono"></div>
+            </label>
+          </div>
+
+          <div class="checkRow">
+            <label class="check">
+              <input id="burnChat" type="checkbox" checked />
+              <span>Show chat as subtitles on screen</span>
+              <button type="button" class="hintBtn hintBtnSm" popovertarget="hint-chat" aria-label="Help: chat">?</button>
+            </label>
+            <label class="check">
+              <input id="chapters" type="checkbox" checked />
+              <span>Add chapters for the seek bar</span>
+              <button type="button" class="hintBtn hintBtnSm" popovertarget="hint-chap" aria-label="Help: chapters">?</button>
+            </label>
+            <label class="check">
+              <input id="skipBreaks" type="checkbox" checked />
+              <span>Skip long inactive breaks</span>
+              <button type="button" class="hintBtn hintBtnSm" popovertarget="hint-break" aria-label="Help: breaks">?</button>
+            </label>
+          </div>
+        </section>
+
+        <div class="wizActions spaced">
+          <button type="button" class="btn ghost" id="btnBackToUpload">← Back</button>
+          <button type="button" class="btn primary bigbtn" id="btnStartExport" disabled>Start export →</button>
+        </div>
+      </div>
+
+      <!-- —— Step 4: progress —— -->
+      <div id="panel4" class="wizardPanel" hidden>
+        <section class="card progCard">
+          <h2 class="wizHeading">Encoding in progress</h2>
+          <p id="progOutpath" class="mono mutedPath"></p>
+          <div class="progHero">
+            <div class="progPercent" id="progPercent">0%</div>
+            <p class="progPercentSub" id="progPercentSub">of recording encoded</p>
+          </div>
+          <div class="progressOuter bigbar">
+            <div class="progressInner" id="bar"></div>
+          </div>
+          <div class="progStats" role="group" aria-label="Encoding progress">
+            <div class="progStat">
+              <span class="progStatLabel">Rendered</span>
+              <span class="progStatValue mono" id="statRendered">00:00:00</span>
+            </div>
+            <div class="progStat">
+              <span class="progStatLabel">Elapsed</span>
+              <span class="progStatValue mono" id="statElapsed">00:00:00</span>
+            </div>
+            <div class="progStat">
+              <span class="progStatLabel">ETA</span>
+              <span class="progStatValue mono" id="statEta">—</span>
+            </div>
+          </div>
+          <div class="progStatusRow">
+            <span class="statusPill mono" id="statusText">running</span>
+          </div>
+          <div class="row martop">
+            <button id="btnStop" class="btn danger">Stop export</button>
+            <button type="button" id="btnCopyLog" class="btn ghost">Copy log</button>
+            <button type="button" class="btn ghost" id="btnBackAfterDone" hidden>← New export</button>
+          </div>
+          <h3 class="logHead">Live log</h3>
+          <pre id="log" class="pre log progLog"></pre>
+        </section>
+      </div>
+    </div>
+
+    <p class="footer">
+      FFmpeg must be installed. Prefer a single <strong>.zip</strong> upload for huge meetings. Hard refresh
+      (<kbd>Ctrl</kbd>+<kbd>F5</kbd>) after updates so <code>/static/</code> files reload.
+    </p>
+
+    <!-- Hint popovers (floating; click ? again or outside to close) -->
+    <div id="hint-out" popover class="hintPopover">
+      File name (e.g. <code>replay.mp4</code>) or a <strong>full path</strong> to the MP4. Must end in <code>.mp4</code>.
+      Browser-uploaded recordings default to <strong>Videos\ConnectExports</strong> on this PC unless you set a folder
+      below.
+    </div>
+    <div id="hint-outdir" popover class="hintPopover">
+      Optional folder on <strong>this computer</strong> where the MP4 will be written (server path). The file name above
+      is placed inside this folder. Leave empty to use the default folder for your session type.
+    </div>
+    <div id="hint-res" popover class="hintPopover">
+      Sharper picture = longer encode and bigger file. Meetings usually look fine at <strong>720p</strong>.
+    </div>
+    <div id="hint-fps" popover class="hintPopover">
+      <strong>FPS</strong> = frames per second. <strong>10–15</strong> is fine for slides; use <strong>24–30</strong> if the screen moves a lot.
+    </div>
+    <div id="hint-crf" popover class="hintPopover">
+      <strong>Lower</strong> CRF = nicer image and heavier file. Typical <strong>26–28</strong> (good), <strong>30–32</strong> (smaller/faster).
+    </div>
+    <div id="hint-spreset" popover class="hintPopover">
+      FFmpeg speed preset: <strong>ultrafast / veryfast</strong> finish sooner (larger files); <strong>slow</strong> takes much longer.
+    </div>
+    <div id="hint-enc" popover class="hintPopover">
+      <strong>Auto</strong> prefers NVIDIA encoding when FFmpeg supports it. Pick <strong>CPU</strong> if GPU exports fail.
+    </div>
+    <div id="hint-chat" popover class="hintPopover">Draws chat on top of the video — looks nice but is noticeably slower.</div>
+    <div id="hint-chap" popover class="hintPopover">Adds timeline chapters so you can skip sections in the player.</div>
+    <div id="hint-break" popover class="hintPopover">
+      Finds very long silent gaps (e.g. lunch) and replaces them with a short “skipped break” screen.
+    </div>
+
+    <script src="/static/app.js"></script>
+  </body>
+</html>
