@@ -15,6 +15,13 @@ from tqdm import tqdm
 _BACKEND_PROGRESS = os.environ.get("CONNECT_EXPORT_BACKEND") == "1"
 
 from exporter.edl import Clip
+from exporter.probe import has_audio_stream, has_video_stream
+
+
+# Screenshare clips shorter than this are typically the result of a host
+# briefly switching streams; they wouldn't be visible anyway and they balloon
+# the filtergraph (or even break it when the duration rounds to 0).
+_MIN_SCREENSHARE_CLIP_MS = 200
 
 
 @dataclass(frozen=True, slots=True)
@@ -172,6 +179,59 @@ def render_fast_mp4(
 
     vcodec = _pick_v_encoder(cfg)
     stage_w, stage_h = _stage_dimensions(cfg, vcodec)
+
+    # Drop screenshare clips that would break the filtergraph:
+    # - sources that don't actually carry a video stream (Connect occasionally
+    #   points a screen_share event at an audio-only FLV);
+    # - extremely short clips (< _MIN_SCREENSHARE_CLIP_MS) that wouldn't render
+    #   anyway and that have been observed to make older FFmpeg builds choke.
+    _v_checked: dict[str, bool] = {}
+    safe_video_clips: list[Clip] = []
+    for vc in video_clips:
+        if vc.src is None:
+            continue
+        dur_ms = max(0, int(vc.end_ms) - int(vc.start_ms))
+        if dur_ms < _MIN_SCREENSHARE_CLIP_MS:
+            print(
+                f"[export] skip degenerate screenshare clip ({dur_ms} ms) src={vc.src.name}",
+                flush=True,
+            )
+            continue
+        k = str(vc.src)
+        ok = _v_checked.get(k)
+        if ok is None:
+            ok = has_video_stream(vc.src)
+            _v_checked[k] = ok
+        if not ok:
+            print(
+                f"[export] skip screenshare clip (no video stream) src={vc.src.name}",
+                flush=True,
+            )
+            continue
+        safe_video_clips.append(vc)
+    video_clips = safe_video_clips
+
+    # Same dance for audio clips: cameraVoip FLVs are sometimes empty / metadata
+    # only. We have to filter before building the input list because every
+    # adelay node addresses its input by absolute index ``[N:a]``.
+    _a_checked: dict[str, bool] = {}
+    safe_audio_clips: list[Clip] = []
+    for ac in audio_clips:
+        if ac.src is None:
+            continue
+        k = str(ac.src)
+        ok = _a_checked.get(k)
+        if ok is None:
+            ok = has_audio_stream(ac.src)
+            _a_checked[k] = ok
+        if not ok:
+            print(
+                f"[export] skip audio clip (no audio stream) src={ac.src.name}",
+                flush=True,
+            )
+            continue
+        safe_audio_clips.append(ac)
+    audio_clips = safe_audio_clips
 
     # Video: black stage + optional screenshare overlays.
     # Audio: mix VoIP chunks placed by startTime, then normalize/boost.
@@ -349,6 +409,18 @@ def render_fast_mp4(
         "+faststart",
         str(tmp_out),
     ]
+
+    # Drop a sidecar log with the exact ffmpeg invocation. When a filtergraph
+    # breaks in the wild it's almost impossible to diagnose without seeing the
+    # whole command, and the live stderr only shows a truncated tail.
+    try:
+        debug_log = tmp_out.with_suffix(tmp_out.suffix + ".ffmpeg-cmd.log")
+        debug_log.write_text(
+            "\n".join(["ffmpeg argv:", *cmd, "", "filter_complex:", cmd[cmd.index("-filter_complex") + 1] if "-filter_complex" in cmd else "(none)"]),
+            encoding="utf-8",
+        )
+    except Exception:
+        pass
 
     proc = subprocess.Popen(cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True, bufsize=1)
     out_time_ms = 0

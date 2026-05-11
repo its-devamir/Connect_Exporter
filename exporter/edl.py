@@ -133,6 +133,15 @@ def build_doc_markers(session: SessionModel) -> list[Clip]:
             continue
         if find_pdf_for_document(folder, name) is not None:
             continue
+        # Some sessions carry docName values like "" or ".pdf" — render as
+        # nothing rather than putting "<empty> is being shown" on screen.
+        # A name is "useless" if it's blank or just a leading-dot extension
+        # ("`.pdf`", "`.docx`", …).
+        cleaned = name.strip()
+        if not cleaned:
+            continue
+        if cleaned.startswith(".") and "." not in cleaned[1:]:
+            continue
         ext = Path(name).suffix.lower()
         if ext in _NON_DOC_MARKER_EXTS:
             continue
