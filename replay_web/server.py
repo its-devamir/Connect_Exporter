@@ -31,10 +31,21 @@ from replay_web.connect_download import (
 )
 
 
+_FROZEN = bool(getattr(sys, "frozen", False))
 _MEIPASS = getattr(sys, "_MEIPASS", None)
+
+# ROOT is used to locate read-only assets (webui/) — in a one-file build that lives in _MEIPASS.
 ROOT = Path(_MEIPASS).resolve() if _MEIPASS else Path(__file__).resolve().parents[1]
 WEBUI_DIR = ROOT / "webui"
-_BROWSER_UPLOAD_ROOT = ROOT / ".replay_cache" / "browser_uploads"
+
+# Writable cache must live next to the exe (or the source tree in dev), not in _MEIPASS
+# which is a temp dir that gets wiped when the process exits.
+if _FROZEN:
+    DATA_ROOT = Path(sys.executable).resolve().parent
+else:
+    DATA_ROOT = Path(__file__).resolve().parents[1]
+
+_BROWSER_UPLOAD_ROOT = DATA_ROOT / ".replay_cache" / "browser_uploads"
 
 
 @dataclass
@@ -838,11 +849,13 @@ def export_start(payload: dict[str, Any]) -> dict[str, Any]:
     child_env["PYTHONUNBUFFERED"] = "1"
     child_env["CONNECT_EXPORT_BACKEND"] = "1"
 
-    cmd = [
-        os.fspath(Path(sys.executable)),
-        "-u",
-        "-m",
-        "exporter.export",
+    # In a PyInstaller bundle there is no separate python interpreter to run `python -m exporter.export`.
+    # Instead the launcher re-invokes the bundled exe with `--exporter-cli` and dispatches internally.
+    if _FROZEN:
+        cmd = [os.fspath(Path(sys.executable)), "--exporter-cli"]
+    else:
+        cmd = [os.fspath(Path(sys.executable)), "-u", "-m", "exporter.export"]
+    cmd += [
         "--folder",
         str(session_dir),
         "--out",
@@ -874,7 +887,7 @@ def export_start(payload: dict[str, Any]) -> dict[str, Any]:
 
     proc = subprocess.Popen(
         cmd,
-        cwd=str(ROOT),
+        cwd=str(DATA_ROOT),
         stdout=subprocess.PIPE,
         stderr=subprocess.STDOUT,
         text=True,

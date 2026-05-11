@@ -44,7 +44,18 @@ If you don’t want to install Python or use the terminal:
 
 - Download the **latest GitHub Release** (a ZIP that contains `ConnectExporter.exe` + a `bin/` folder with FFmpeg).
 - Unzip it.
-- Run `ConnectExporter.exe`.
+- Double-click **`START_HERE.bat`** (or `ConnectExporter.exe`).
+
+Maintainers can rebuild that release on Windows with:
+
+```powershell
+.\tools\build_windows_release.ps1 `
+  -Python "C:\Python313\python.exe" `
+  -FfmpegExe "C:\ffmpeg\bin\ffmpeg.exe" `
+  -FfprobeExe "C:\ffmpeg\bin\ffprobe.exe"
+```
+
+This produces `release\` (exe + `bin\ffmpeg.exe` + `bin\ffprobe.exe` + `START_HERE.bat` + `README-WIN.txt`) and a `ConnectExporter-win64.zip` ready to attach to a GitHub Release. Verify the resulting exe with `.\tools\smoke_exe.ps1`.
 
 ### 3. Using the UI (wizard)
 
