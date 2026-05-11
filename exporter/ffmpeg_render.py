@@ -94,8 +94,42 @@ def _stage_dimensions(cfg: RenderConfig, vcodec: str) -> tuple[int, int]:
     return w0, h0
 
 
+def _esc_drawtext(s: str) -> str:
+    """Escape a string for use inside a drawtext ``text='...'`` value.
+
+    FFmpeg's filtergraph parser has two escaping levels: the outer one (used to
+    delimit filters with ``,``/``;``) and the inner one (used to separate filter
+    options with ``:``). Single-quote wrapping is the standard way to protect the
+    value at the outer level, but older FFmpeg builds in the wild are not always
+    consistent about it. Explicitly escaping every metacharacter we control makes
+    the chain robust across ffmpeg 4.x/5.x/6.x.
+    """
+
+    return (
+        s.replace("\\", "\\\\")
+        .replace(":", "\\:")
+        .replace("'", "\\'")
+        .replace(",", "\\,")
+        .replace("[", "\\[")
+        .replace("]", "\\]")
+        .replace(";", "\\;")
+    )
+
+
+def _enable_window(start_s: float, end_s: float) -> str:
+    """Return an FFmpeg ``enable=`` expression for ``[start_s, end_s]``.
+
+    We deliberately avoid ``between(t,X,Y)`` because its inner commas have
+    historically tripped FFmpeg's filter parser when several filters are chained
+    together. ``gte(t\\,X)*lte(t\\,Y)`` is equivalent and only carries escaped
+    commas, which every supported FFmpeg parses correctly.
+    """
+
+    return f"gte(t\\,{start_s:.3f})*lte(t\\,{end_s:.3f})"
+
+
 def _drawtext(label: str, start_s: float, end_s: float, *, stage_h: int) -> str:
-    label = label.replace(":", "\\:").replace("'", "\\'")
+    label = _esc_drawtext(label)
     fs = max(10, min(44, int(stage_h / 10)))
     bw = max(4, min(18, int(stage_h / 22)))
     fp = _ffmpeg_font_path_literal()
@@ -106,7 +140,7 @@ def _drawtext(label: str, start_s: float, end_s: float, *, stage_h: int) -> str:
         f"box=1:boxcolor=black@0.55:boxborderw={bw}:"
         "x=(w-text_w)/2:y=(h-text_h)/2:"
         f"text='{label}':"
-        f"enable='between(t,{start_s:.3f},{end_s:.3f})'"
+        f"enable={_enable_window(start_s, end_s)}"
     )
 
 
@@ -228,7 +262,7 @@ def render_fast_mp4(
             f"trim=start=0:duration={dur_s:.3f},setpts=PTS-STARTPTS+{start_s:.3f}/TB[{vlab}]"
         )
         overlay_steps.append(
-            f"[{current_label}][{vlab}]overlay=enable='between(t,{start_s:.3f},{end_s:.3f})'[{nlab}]"
+            f"[{current_label}][{vlab}]overlay=enable={_enable_window(start_s, end_s)}[{nlab}]"
         )
         current_label = nlab
 
@@ -246,7 +280,7 @@ def render_fast_mp4(
             f"pad={stage_w}:{stage_h}:(ow-iw)/2:(oh-ih)/2:black,format=yuv420p[{plab}]"
         )
         overlay_steps.append(
-            f"[{current_label}][{plab}]overlay=enable='between(t,{start_s:.3f},{end_s:.3f})'[{nlab}]"
+            f"[{current_label}][{plab}]overlay=enable={_enable_window(start_s, end_s)}[{nlab}]"
         )
         current_label = nlab
 

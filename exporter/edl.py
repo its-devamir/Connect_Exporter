@@ -1,10 +1,23 @@
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from pathlib import Path
 
 from replay_core.session_model import SessionModel
 from replay_web.materials import find_pdf_for_document
+
+
+# Files whose name we don't want to render as a stage text marker.
+# Hosts often pre-load images/screenshots/videos into the share pod; turning each
+# one into a drawtext overlay both looks bad (six labels stacked on top of each
+# other) and used to crash FFmpeg's filter parser via the chained-overlay path.
+_NON_DOC_MARKER_EXTS = frozenset(
+    {".png", ".jpg", ".jpeg", ".gif", ".bmp", ".webp", ".tif", ".tiff", ".mp4", ".mov", ".webm", ".mkv", ".m4v"}
+)
+
+# Doc-share events whose start times are within this window of one another get
+# collapsed into a single text marker so the drawtext filter chain stays short.
+_DOC_MARKER_COLLAPSE_MS = 1500
 
 
 @dataclass(frozen=True, slots=True)
@@ -93,12 +106,23 @@ def build_av_clips(session: SessionModel) -> tuple[list[Clip], list[Clip]]:
 def build_doc_markers(session: SessionModel) -> list[Clip]:
     """Short text overlays announcing a new document share.
 
-    These are only used for documents that the user did NOT attach as a real PDF —
-    if they did, :func:`build_doc_image_clips` produces a richer page overlay and we
-    don't want both running at the same time.
+    Only documents that the user did NOT attach as a real PDF get a marker — if
+    they did, :func:`build_doc_image_clips` produces a richer page overlay and we
+    don't want both at the same time.
+
+    We also keep the marker set small and well-behaved so the FFmpeg
+    ``filter_complex`` graph stays short:
+
+    - Skip images / videos that Connect sometimes classifies as "documents"; their
+      filenames aren't useful to display and they tend to be loaded in batches.
+    - Collapse markers whose start times are within
+      :data:`_DOC_MARKER_COLLAPSE_MS` of one another into a single marker (the
+      most recent name wins). Long chains of simultaneous drawtext filters used
+      to break FFmpeg's filter parser ("Stream specifier ':v' ... matches no
+      streams").
     """
 
-    out: list[Clip] = []
+    raw: list[Clip] = []
     folder = Path(session.folder)
     for ev in session.events:
         if ev.type != "doc_share":
@@ -107,11 +131,20 @@ def build_doc_markers(session: SessionModel) -> list[Clip]:
         name = str(ev.payload.get("docName") or "")
         if share_type != "document" or not name:
             continue
-        # Suppress the text marker when the user has attached a matching PDF; the
-        # page image will replace it.
         if find_pdf_for_document(folder, name) is not None:
             continue
-        out.append(Clip(kind="doc_marker", src=None, start_ms=_ms(ev.t_ms), end_ms=_ms(ev.t_ms + 4000), label=name))
+        ext = Path(name).suffix.lower()
+        if ext in _NON_DOC_MARKER_EXTS:
+            continue
+        raw.append(Clip(kind="doc_marker", src=None, start_ms=_ms(ev.t_ms), end_ms=_ms(ev.t_ms + 4000), label=name))
+
+    raw.sort(key=lambda c: c.start_ms)
+    out: list[Clip] = []
+    for c in raw:
+        if out and c.start_ms - out[-1].start_ms < _DOC_MARKER_COLLAPSE_MS:
+            out[-1] = replace(out[-1], label=c.label, end_ms=max(out[-1].end_ms, c.end_ms))
+        else:
+            out.append(c)
     return out
 
 
