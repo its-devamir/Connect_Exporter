@@ -10,6 +10,7 @@ EventType = Literal[
     "stop_stream",
     "screen_share",
     "doc_share",
+    "doc_page",
     "voip_status",
     "chat",
     "unknown",

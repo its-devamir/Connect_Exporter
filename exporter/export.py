@@ -9,7 +9,13 @@ from pathlib import Path
 from replay_core.session_model import SessionModel
 from replay_core.chat import parse_ftchat
 from exporter.chat_ass import cues_from_ftchat, write_chat_ass
-from exporter.edl import build_av_clips, build_doc_markers
+from exporter.edl import (
+    Clip,
+    build_av_clips,
+    build_doc_image_clips,
+    build_doc_markers,
+    materialize_doc_image_clips,
+)
 from exporter.ffmpeg_render import RenderConfig, render_fast_mp4
 from exporter.timewarp import Break, Timewarp
 from exporter.probe import probe_duration_ms
@@ -59,6 +65,9 @@ def main() -> int:
     session = SessionModel.from_folder(folder)
     audio, video = build_av_clips(session)
     doc = build_doc_markers(session)
+    # Attached-PDF page overlays — only filled in when the user uploaded a matching
+    # PDF in the Materials wizard step (or dropped one into <session>/materials/).
+    doc_images_raw = build_doc_image_clips(session, stage_w=int(args.w), stage_h=int(args.h))
 
     # Chat from ftchat (has sender PID).
     chat_msgs = parse_ftchat(folder)
@@ -116,10 +125,10 @@ def main() -> int:
     audio = warp_clips(audio)
     video = warp_clips(video)
     doc = warp_clips(doc)
+    doc_images_raw = warp_clips(doc_images_raw)
 
     # Add break slate overlay(s).
     if breaks:
-        from exporter.edl import Clip
         for b in breaks:
             mins = max(1, int(round((b.end_ms - b.start_ms) / 60000.0)))
             start = tw.map_time(b.start_ms)
@@ -167,13 +176,27 @@ def main() -> int:
 
     print("[export] Building timeline and filters...", flush=True)
     cfg = RenderConfig(width=args.w, height=args.h, fps=args.fps, crf=args.crf, preset=args.preset, encoder=str(args.encoder))
+
+    # Materialize PDF pages now that the stage size is locked in.
+    doc_images: list[Clip] = []
+    if doc_images_raw:
+        cache_dir = folder / ".replay_cache" / "materials"
+        try:
+            doc_images = materialize_doc_image_clips(
+                doc_images_raw, stage_w=int(cfg.width), cache_dir=cache_dir
+            )
+        except Exception as e:
+            print(f"[export] PDF page rendering disabled: {e}", flush=True)
+            doc_images = []
+    overlays = doc + doc_images
+
     try:
         render_fast_mp4(
             out_mp4=out,
             duration_ms=tw.map_time(session.duration_ms) if breaks else session.duration_ms,
             audio_clips=audio,
             video_clips=video,
-            overlays=doc,
+            overlays=overlays,
             chat_ass=chat_ass,
             ffmetadata=ffmeta,
             cfg=cfg,

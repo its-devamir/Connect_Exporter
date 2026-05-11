@@ -2,3 +2,4 @@ tqdm>=4.66
 fastapi>=0.111
 uvicorn>=0.30
 python-multipart>=0.0.9
+pypdfium2>=4.30

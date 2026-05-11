@@ -8,7 +8,9 @@ from pathlib import Path
 # including the exporter subprocess path (re-invoked via --exporter-cli below).
 import exporter.export  # noqa: F401
 import exporter.ffmpeg_render  # noqa: F401
+import exporter.pdf_pages  # noqa: F401
 import replay_core.session_model  # noqa: F401
+import replay_web.materials  # noqa: F401
 
 
 def _prepend_bundled_bin_to_path() -> None:

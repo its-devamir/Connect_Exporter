@@ -61,11 +61,14 @@ We still keep these events as “useful hints” for analysis and future feature
 This is the event family that signals:
 - **Screen share starts/stops** (via `screenDescriptor.streamID`)
 - **Document/whiteboard share** (via `shareType=document|wb`, plus `documentDescriptor.theName`)
+- **Page changes on a shared PDF** (a `child_change` / `attribute_change` delta that carries a numeric value under a key like `currentPage` / `pageIndex` / `pageNum` / `slide` / `frame…`)
 
 For exporting we do:
-- If screenshare video exists: overlay those chunks onto the stage
-- For document share: we do not render PDF; we show a **text marker overlay** like:
-  - `Introduction.pdf is being shown`
+- If screenshare video exists: overlay those chunks onto the stage.
+- For document share:
+  - If the user attached the matching PDF (see "Materials" wizard step), we **rasterize the active page with PDFium and overlay it on the stage** for the entire share window. When page-change events are detected, we switch the overlay to the new page at the right time. If no page-change events show up, we just keep page 1.
+  - If no PDF is attached, we fall back to the old short text marker (`Introduction.pdf is being shown`).
+  - Page-change heuristics are intentionally defensive — see `_PAGE_KEYS` in `replay_core/events.py`. Unknown deltas are still kept as `unknown` events so we can decode more details later without re-parsing.
 
 ### `ftchat*.xml`
 These files contain chat history messages.
@@ -99,10 +102,12 @@ So:
 - **Chat overlay** with `fromPID` (`user123: ...`) using ASS subtitles.
 - **Break detection** using “no active audio windows + no chat for a long time”, then compressing that gap into a short slate.
 - **Chapters** (timeline headings) for chunk starts and breaks (MP4 chapter metadata).
+- **Document detection + PDF page overlay**: We always know *which* PDF was being shown at time `t`. If the user attaches the matching PDF, we render its pages with PDFium and overlay them as the stage. Page changes are tracked when Connect emits them.
 
 ## What is still hard / future work
 - Perfect “who is talking” timeline: we have `userVoipStatusChanged`, but it is noisy and can toggle rapidly.
-- Document/whiteboard true rendering: Connect’s internal whiteboard operations are non-trivial to reconstruct visually.
+- Pointer / laser-pointer position on the doc: events exist in `setContentSo`, we don't render them yet.
+- Marker / annotation strokes (the host's "teacher marker"): captured by Connect but rendering them requires a small stroke-replay layer.
 - Multi-party audio separation: we currently mix everything; separating speakers requires deeper mapping and sometimes isn’t possible from exports alone.
 
 ## Key vocabulary used in our code

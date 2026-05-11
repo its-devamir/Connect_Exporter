@@ -4,6 +4,7 @@ This folder contains everything needed to export an Adobe Connect recording fold
 
 - Mixed VoIP audio (correct chunk placement)
 - Screenshare overlaid on a black stage
+- **Attached PDFs rendered as page overlays** during the time the document was shared
 - Optional chat popups
 - Optional break skipping
 - Optional MP4 chapters (timeline headings)
@@ -59,7 +60,7 @@ This produces `release\` (exe + `bin\ffmpeg.exe` + `bin\ffprobe.exe` + `START_HE
 
 ### 3. Using the UI (wizard)
 
-The UI has four steps: **Download** → **Upload** → **Settings** → **Export**.
+The UI has five steps: **Download** → **Upload** → **Materials** → **Settings** → **Export**.
 
 1. **Download**
    - Paste the **session URL** (e.g. `https://…/?session=…`).
@@ -68,17 +69,22 @@ The UI has four steps: **Download** → **Upload** → **Settings** → **Export
 2. **Upload**
    - Drag–drop the **ZIP** you downloaded (recommended), or a **folder** export.
    - Or paste a **disk path** (same machine as `run_server`).
-   - Click **Next: Settings →** (the app verifies the session).
-3. **Settings**
+   - Click **Next: Materials →** (the app verifies the session).
+3. **Materials** *(new in v0.2)*
+   - We list every PDF that was shared during the meeting.
+   - For each one, click **Attach PDF…** to upload the original file. We match by filename, so picking the right PDF is one click.
+   - If you skip this, the exporter falls back to a small text marker (the old behavior).
+   - Attached PDFs are saved alongside the recording under `materials/`, so you can re-export later without re-uploading.
+4. **Settings**
    - See **Your system** (OS, FFmpeg, NVENC, GPUs).
    - **Rough estimates** for encode time and output size update when you change options.
    - Use presets (**Fast preview**, **Balanced**, **High quality**) or customize resolution (720p, 1080p, custom), FPS, quality (CRF), encoder, and toggles. **`?`** icons explain each control.
-4. **Export**
-   - **Start export** opens step 4 with a **live log**, progress bar, percent, and ETA. Use **Stop** to cancel.
+5. **Export**
+   - **Start export** opens step 5 with a **live log**, progress bar, percent, and ETA. Use **Stop** to cancel.
 
 Outputs default next to the recording folder unless you use an absolute path.
 
-Install **`python-multipart`** (`requirements.txt`) so ZIP/folder uploads work.
+Install **`python-multipart`** and **`pypdfium2`** (`requirements.txt`) so ZIP/folder uploads and PDF page rendering both work.
 
 ### 4. Command-line export (advanced)
 

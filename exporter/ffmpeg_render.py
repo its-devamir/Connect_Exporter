@@ -172,29 +172,43 @@ def render_fast_mp4(
             continue
         k = str(vc.src)
         if k not in vid_src_to_input:
-            vid_src_to_input[k] = len(base)  # placeholder; will be corrected after inputs added
+            vid_src_to_input[k] = len(base)
             unique_vid.append(vc.src)
     for p in unique_vid:
         base += ["-i", str(p)]
 
+    # PDF page overlays: one image input per unique PNG (deduped). Each is fed as a
+    # looped single-frame stream so we can `overlay=enable=between(...)` them.
+    doc_image_clips = [
+        o for o in overlays if o.kind == "doc_image" and o.src is not None
+    ]
+    unique_doc_pngs: list[Path] = []
+    doc_png_to_idx: dict[str, int] = {}
+    for o in doc_image_clips:
+        k = str(o.src)
+        if k not in doc_png_to_idx:
+            doc_png_to_idx[k] = len(unique_doc_pngs)
+            unique_doc_pngs.append(o.src)  # type: ignore[arg-type]
+    for p in unique_doc_pngs:
+        # `-loop 1` repeats the still image; framerate small to keep filter graph light.
+        base += ["-loop", "1", "-framerate", "1", "-i", str(p)]
+
     filters: list[str] = []
 
-    # Overlays: doc markers.
+    # Overlays drawn as text on the base black layer.
     for o in overlays:
         if o.kind == "doc_marker" and o.label:
             filters.append(_drawtext(f"{o.label} is being shown", _sec(o.start_ms), _sec(o.end_ms), stage_h=stage_h))
         if o.kind == "break" and o.label:
             filters.append(_drawtext(o.label, _sec(o.start_ms), _sec(o.end_ms), stage_h=stage_h))
 
-    # Build video graph: base black + doc markers + optional screenshare overlay + optional subtitles.
-    vchain = "[0:v]"
+    # Build video graph: base black + drawtext markers + screenshare overlays + PDF page overlays + optional subtitles.
     vf_chain = ",".join(filters) if filters else "null"
-    vchain = f"{vchain}{vf_chain}"
-    # Overlay screenshare clips.
-    # Input indices: 0 is base, 1 is optional ffmetadata, then audio inputs, then video inputs.
+    # Input indices: 0 base, [1 ffmetadata], audio inputs..., screenshare inputs..., PDF inputs...
     meta_inputs = 1 if ffmetadata is not None else 0
     audio_input_count = sum(1 for c in audio_clips if c.src is not None)
     video_base_idx = 1 + meta_inputs + audio_input_count
+    doc_image_base_idx = video_base_idx + len(unique_vid)
 
     overlay_steps: list[str] = []
     current_label = "v0"
@@ -215,6 +229,24 @@ def render_fast_mp4(
         )
         overlay_steps.append(
             f"[{current_label}][{vlab}]overlay=enable='between(t,{start_s:.3f},{end_s:.3f})'[{nlab}]"
+        )
+        current_label = nlab
+
+    # PDF page overlays: scale the (still) page to fit the stage, then overlay only
+    # during the segment we computed. Each image input is independent of other
+    # overlays — the stage is the latest current_label.
+    for j, oc in enumerate(doc_image_clips):
+        idx = doc_image_base_idx + doc_png_to_idx[str(oc.src)]
+        start_s = _sec(oc.start_ms)
+        end_s = _sec(oc.end_ms)
+        plab = f"dp{j}"
+        nlab = f"vd{j+1}"
+        overlay_steps.append(
+            f"[{idx}:v]scale={stage_w}:{stage_h}:force_original_aspect_ratio=decrease,"
+            f"pad={stage_w}:{stage_h}:(ow-iw)/2:(oh-ih)/2:black,format=yuv420p[{plab}]"
+        )
+        overlay_steps.append(
+            f"[{current_label}][{plab}]overlay=enable='between(t,{start_s:.3f},{end_s:.3f})'[{nlab}]"
         )
         current_label = nlab
 

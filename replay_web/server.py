@@ -17,7 +17,7 @@ from posixpath import normpath
 
 from typing import Annotated, Any
 
-from fastapi import FastAPI, File, HTTPException, UploadFile
+from fastapi import FastAPI, File, Form, HTTPException, UploadFile
 from fastapi.responses import FileResponse
 from fastapi.staticfiles import StaticFiles
 
@@ -28,6 +28,11 @@ from replay_web.connect_download import (
     build_zip_relpaths_from_sco_id,
     stream_url_to_file,
     try_extract_sco_ids_from_html,
+)
+from replay_web.materials import (
+    attached_pdfs,
+    materials_dir,
+    safe_filename,
 )
 
 
@@ -778,6 +783,133 @@ def preflight(payload: dict[str, Any]) -> dict[str, Any]:
         "warnings": warns,
         "system": syspl,
     }
+
+
+@app.get("/api/session/materials")
+def session_materials(folder: str = "") -> dict[str, Any]:
+    """List documents detected in the session and which ones already have a PDF attached.
+
+    The returned ``documents`` items each carry a ``safe_filename`` that's also the
+    filename the matching PDF must end up with under ``<session>/materials/``.
+    """
+
+    if not folder:
+        raise HTTPException(status_code=400, detail="Missing folder")
+    session_dir = _resolve_folder(folder)
+    session = SessionModel.from_folder(session_dir)
+    attached = attached_pdfs(session_dir)
+
+    docs_out: list[dict[str, Any]] = []
+    for d in session.documents:
+        safe = safe_filename(d.name)
+        att = attached.get(safe.lower())
+        page_count = sum(1 for s in session.doc_page_segments if s.ct_id == d.ct_id and s.doc_name == d.name)
+        docs_out.append(
+            {
+                "name": d.name,
+                "ct_id": d.ct_id,
+                "who_started": d.who_started,
+                "first_seen_ms": d.first_seen_ms,
+                "last_seen_ms": d.last_seen_ms,
+                "active_ms": d.active_ms,
+                "page_changes_detected": page_count,
+                "safe_filename": safe,
+                "uploaded": att is not None,
+                "uploaded_size": att.size_bytes if att is not None else 0,
+            }
+        )
+
+    # Stray PDFs the user dropped in materials/ that don't match a detected document.
+    matched = {d["safe_filename"].lower() for d in docs_out if d["uploaded"]}
+    unmatched: list[dict[str, Any]] = []
+    for ap in attached.values():
+        if ap.safe_name.lower() in matched:
+            continue
+        unmatched.append({"safe_filename": ap.safe_name, "size_bytes": ap.size_bytes})
+
+    return {
+        "folder": os.fspath(session_dir),
+        "duration_ms": session.duration_ms,
+        "documents": docs_out,
+        "unmatched_uploads": unmatched,
+        "page_renderer_available": _pdf_renderer_available(),
+    }
+
+
+def _pdf_renderer_available() -> bool:
+    try:
+        from exporter.pdf_pages import available as _pdf_av  # type: ignore
+
+        return bool(_pdf_av())
+    except Exception:
+        return False
+
+
+@app.post("/api/session/material/upload")
+async def session_material_upload(
+    folder: Annotated[str, Form(...)],
+    safe_filename_in: Annotated[str, Form(..., alias="safe_filename")],
+    file: UploadFile = File(...),
+) -> dict[str, Any]:
+    """Attach a single PDF to a session under ``<session>/materials/<safe_filename>``."""
+
+    session_dir = _resolve_folder(folder)
+    target_name = safe_filename(safe_filename_in or file.filename or "document.pdf")
+    if not target_name.lower().endswith(".pdf"):
+        raise HTTPException(status_code=400, detail="Only .pdf files can be attached as materials.")
+
+    dest = materials_dir(session_dir) / target_name
+    try:
+        await _stream_upload_to_file(file, dest)
+    finally:
+        await file.close()
+
+    # Quick header sanity check; we don't reject otherwise (some teachers ship odd PDFs).
+    try:
+        with dest.open("rb") as f:
+            head = f.read(5)
+        if head[:4] != b"%PDF":
+            dest.unlink(missing_ok=True)
+            raise HTTPException(status_code=400, detail="File does not look like a PDF (missing %PDF header).")
+    except HTTPException:
+        raise
+    except OSError as e:
+        raise HTTPException(status_code=500, detail=f"Could not save material: {e}") from e
+
+    size = dest.stat().st_size
+
+    page_count = 0
+    try:
+        from exporter.pdf_pages import page_count as _pc  # type: ignore
+
+        page_count = int(_pc(dest))
+    except Exception:
+        page_count = 0
+
+    return {
+        "ok": True,
+        "safe_filename": target_name,
+        "path": os.fspath(dest),
+        "size_bytes": int(size),
+        "page_count": page_count,
+        "renderer_available": _pdf_renderer_available(),
+    }
+
+
+@app.post("/api/session/material/delete")
+def session_material_delete(payload: dict[str, Any]) -> dict[str, Any]:
+    folder = str(payload.get("folder") or "")
+    name = str(payload.get("safe_filename") or "")
+    if not folder or not name:
+        raise HTTPException(status_code=400, detail="Missing folder or safe_filename")
+    session_dir = _resolve_folder(folder)
+    target = materials_dir(session_dir) / safe_filename(name)
+    try:
+        if target.is_file():
+            target.unlink()
+    except OSError as e:
+        raise HTTPException(status_code=500, detail=f"Could not delete material: {e}") from e
+    return {"ok": True}
 
 
 @app.get("/api/export/status")

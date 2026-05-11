@@ -40,7 +40,11 @@ $pyArgs = @(
   "--hidden-import","replay_core.session_model",
   "--hidden-import","replay_core.types",
   "--hidden-import","replay_web.connect_download",
-  "--hidden-import","replay_web.server"
+  "--hidden-import","replay_web.server",
+  "--hidden-import","replay_web.materials",
+  "--hidden-import","exporter.pdf_pages",
+  "--hidden-import","pypdfium2",
+  "--collect-binaries","pypdfium2_raw"
 )
 
 $excludes = @(

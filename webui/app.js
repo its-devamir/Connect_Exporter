@@ -13,18 +13,25 @@ let toastTimer = null;
 let pollTimer = null;
 let lastPreflightOk = false;
 let uploadBusy = false;
-/** @type {1|2|3|4} */
+/** @type {1|2|3|4|5} */
 let wizardStep = 1;
 let estimateDebounce = 0;
 let prevPollState = "idle";
 /** @type {number | null} */
 let dlPollTimer = null;
 
-const STEP2_NEXT_LABEL = "Next: Settings →";
+/** @type {Array<any>} */
+let detectedDocuments = [];
+let materialsRendererAvailable = false;
+let materialsFetchInFlight = false;
+/** Cached for the file-input change handler (which doesn't know which row triggered it). */
+let pendingMaterialUpload = null;
 
-/** Disable Next button and optionally change label while uploading/checking. */
+const STEP2_NEXT_LABEL = "Next: Materials →";
+
+/** Disable Upload's Next button and optionally change label while uploading/checking. */
 function setStep1PrimaryBusy(busy, label) {
-  const btn = el("btnToSettings");
+  const btn = el("btnToMaterials");
   if (busy) {
     btn.dataset.busy = "1";
     btn.disabled = true;
@@ -37,13 +44,14 @@ function setStep1PrimaryBusy(busy, label) {
 }
 
 function syncStep1NextButton() {
-  const btn = el("btnToSettings");
+  const btn = el("btnToMaterials");
   if (btn.dataset.busy === "1") return;
   const path = getSessionFolder().trim();
   btn.disabled = uploadBusy || !path;
 }
 
-async function advanceFromStep1() {
+/** Verify the uploaded recording, then advance from Upload → Materials. */
+async function advanceFromUploadToMaterials() {
   const folder = getSessionFolder().trim();
   if (!folder) {
     showToast("Add a recording first — upload, or paste a path.", "error");
@@ -54,7 +62,7 @@ async function advanceFromStep1() {
     const ok = await runPreflight({ toastOk: true });
     if (ok) {
       wizardGo(3);
-      refreshSystemOnly();
+      refreshMaterials();
     }
   } finally {
     setStep1PrimaryBusy(false);
@@ -193,6 +201,7 @@ function clearVerification() {
   setPreflightBadge(false);
   el("warningsBox").hidden = true;
   el("warningsBox").innerHTML = "";
+  detectedDocuments = [];
   syncStep1NextButton();
 }
 
@@ -202,17 +211,26 @@ function wizardGo(step) {
   el("panel2").hidden = step !== 2;
   el("panel3").hidden = step !== 3;
   el("panel4").hidden = step !== 4;
-  [["wizTab1", 1], ["wizTab2", 2], ["wizTab3", 3], ["wizTab4", 4]].forEach(([tid, sn]) => {
+  el("panel5").hidden = step !== 5;
+  [
+    ["wizTab1", 1],
+    ["wizTab2", 2],
+    ["wizTab3", 3],
+    ["wizTab4", 4],
+    ["wizTab5", 5],
+  ].forEach(([tid, sn]) => {
     el(tid).classList.toggle("active", sn === step);
   });
   syncWizardTabDisabled();
 }
 
 function syncWizardTabDisabled() {
-  // step2 (Upload) is always reachable from step1 once user downloaded the ZIP
+  // Step 2 (Upload) is always reachable from Step 1.
   el("wizTab2").disabled = false;
+  // Materials, Settings, Export gated by a successful preflight (we know the folder is good).
   el("wizTab3").disabled = !lastPreflightOk;
-  el("wizTab4").disabled = wizardStep !== 4;
+  el("wizTab4").disabled = !lastPreflightOk;
+  el("wizTab5").disabled = wizardStep !== 5;
 }
 
 function fmtSec(sec) {
@@ -304,6 +322,8 @@ async function runPreflight({ toastOk = false } = {}) {
     lastPreflightOk = true;
     setPreflightBadge(true);
     el("wizTab2").disabled = false;
+    el("wizTab3").disabled = false;
+    el("wizTab4").disabled = false;
     el("btnStartExport").disabled = false;
     syncWizardTabDisabled();
     syncStep1NextButton();
@@ -319,7 +339,8 @@ async function runPreflight({ toastOk = false } = {}) {
 }
 
 function scheduleEstimatesRefresh() {
-  if (!lastPreflightOk || wizardStep === 4) return;
+  // Skip while watching live export progress.
+  if (!lastPreflightOk || wizardStep === 5) return;
   clearTimeout(estimateDebounce);
   estimateDebounce = window.setTimeout(() => {
     runPreflight({ toastOk: false }).catch(() => {});
@@ -381,11 +402,167 @@ async function ingestUploadResult(uploaded) {
   try {
     const ok = await runPreflight({ toastOk: true });
     if (ok) {
+      // Stay on the Upload panel so the user sees the success badge and can hit
+      // "Next: Materials". This matches the new wizard flow.
       wizardGo(2);
       refreshSystemOnly();
     }
   } finally {
     setStep1PrimaryBusy(false);
+  }
+}
+
+/** Format a millisecond duration as "Hh Mm" / "Mm Ss". Used in the materials list. */
+function fmtDurationMs(ms) {
+  const v = Number(ms);
+  if (!Number.isFinite(v) || v <= 0) return "—";
+  const s = Math.round(v / 1000);
+  const h = Math.floor(s / 3600);
+  const m = Math.floor((s % 3600) / 60);
+  const sec = s % 60;
+  if (h > 0) return `${h}h ${m}m`;
+  if (m > 0) return `${m}m ${sec}s`;
+  return `${sec}s`;
+}
+
+async function refreshMaterials() {
+  const folder = getSessionFolder().trim();
+  const list = el("materialsList");
+  if (!folder) {
+    list.innerHTML = '<div class="materialsEmpty mono">Verify a recording first.</div>';
+    return;
+  }
+  if (materialsFetchInFlight) return;
+  materialsFetchInFlight = true;
+  list.innerHTML = '<div class="materialsEmpty mono">Loading detected documents…</div>';
+  try {
+    const url = `/api/session/materials?folder=${encodeURIComponent(folder)}`;
+    const data = await api(url);
+    detectedDocuments = data.documents || [];
+    materialsRendererAvailable = !!data.page_renderer_available;
+    renderMaterials(data);
+  } catch (e) {
+    list.innerHTML = `<div class="materialsEmpty mono">Could not load materials: ${escapeHtmlShort(String(e))}</div>`;
+  } finally {
+    materialsFetchInFlight = false;
+  }
+}
+
+function renderMaterials(data) {
+  const list = el("materialsList");
+  const info = el("materialsRendererInfo");
+  info.hidden = materialsRendererAvailable;
+  if (!materialsRendererAvailable) {
+    info.innerHTML =
+      "<strong>Note:</strong> PDF page rendering is not available on the server (install <code>pypdfium2</code>). Attached PDFs will still be saved but will not appear as overlays.";
+  }
+
+  const docs = data.documents || [];
+  if (!docs.length) {
+    list.innerHTML =
+      '<div class="materialsEmpty">No PDFs were shared during this session — nothing to attach. Click <strong>Next: Settings</strong> to continue.</div>';
+    return;
+  }
+
+  const rows = docs.map((d, idx) => {
+    const upStatus = d.uploaded
+      ? `<span class="matBadge ok">Attached • ${fmtBytes(d.uploaded_size)}</span>`
+      : '<span class="matBadge subtle">Not attached</span>';
+    const pageHint = d.page_changes_detected
+      ? `${d.page_changes_detected} page-change(s) detected`
+      : "no page-change events detected — page 1 used for the whole share";
+    const actions = d.uploaded
+      ? `<button type="button" class="btn ghost" data-mat-action="replace" data-mat-idx="${idx}">Replace</button>
+         <button type="button" class="btn danger" data-mat-action="delete" data-mat-idx="${idx}">Remove</button>`
+      : `<button type="button" class="btn primary" data-mat-action="attach" data-mat-idx="${idx}">Attach PDF…</button>`;
+    return `
+      <div class="materialRow">
+        <div class="materialMain">
+          <div class="materialName mono">${escapeHtmlShort(d.name)}</div>
+          <div class="materialMeta">
+            <span>First seen ${fmtDurationMs(d.first_seen_ms)} in</span>
+            <span class="dot">•</span>
+            <span>Active ${fmtDurationMs(d.active_ms)}</span>
+            <span class="dot">•</span>
+            <span>${escapeHtmlShort(pageHint)}</span>
+          </div>
+        </div>
+        <div class="materialState">${upStatus}</div>
+        <div class="materialActions">${actions}</div>
+      </div>`;
+  });
+
+  const unmatched = data.unmatched_uploads || [];
+  let unmatchedHtml = "";
+  if (unmatched.length) {
+    unmatchedHtml = `
+      <div class="materialRow materialRowExtra">
+        <div class="materialMain">
+          <div class="materialName">Other attached PDFs (no matching document in this session)</div>
+          <div class="materialMeta mono">${unmatched
+            .map((u) => `${escapeHtmlShort(u.safe_filename)} (${fmtBytes(u.size_bytes)})`)
+            .join("<br/>")}</div>
+        </div>
+      </div>`;
+  }
+
+  list.innerHTML = rows.join("") + unmatchedHtml;
+}
+
+function onMaterialsListClick(e) {
+  const btn = e.target.closest("button[data-mat-action]");
+  if (!btn) return;
+  const idx = Number(btn.dataset.matIdx);
+  const doc = detectedDocuments[idx];
+  if (!doc) return;
+  const action = btn.dataset.matAction;
+  if (action === "attach" || action === "replace") {
+    pendingMaterialUpload = doc;
+    el("materialFileInput").click();
+  } else if (action === "delete") {
+    deleteMaterial(doc).catch((err) => showToast(String(err), "error"));
+  }
+}
+
+async function deleteMaterial(doc) {
+  const folder = getSessionFolder().trim();
+  if (!folder) return;
+  try {
+    await api("/api/session/material/delete", {
+      method: "POST",
+      body: JSON.stringify({ folder, safe_filename: doc.safe_filename }),
+    });
+    showToast(`Removed ${doc.safe_filename}.`, "info");
+  } catch (e) {
+    showToast(String(e), "error");
+  } finally {
+    await refreshMaterials();
+  }
+}
+
+async function uploadMaterial(file) {
+  const doc = pendingMaterialUpload;
+  pendingMaterialUpload = null;
+  if (!doc || !file) return;
+  const folder = getSessionFolder().trim();
+  if (!folder) return;
+  if (!file.name.toLowerCase().endsWith(".pdf")) {
+    showToast("Please choose a .pdf file.", "error");
+    return;
+  }
+  const fd = new FormData();
+  fd.append("folder", folder);
+  fd.append("safe_filename", doc.safe_filename);
+  fd.append("file", file, file.name);
+  try {
+    const res = await fetch("/api/session/material/upload", { method: "POST", body: fd });
+    const data = await fetchJsonOk(res);
+    const pcMsg = data.page_count ? ` (${data.page_count} pages)` : "";
+    showToast(`Attached ${doc.name}${pcMsg}.`, "info");
+  } catch (e) {
+    showToast(String(e), "error");
+  } finally {
+    await refreshMaterials();
   }
 }
 
@@ -656,12 +833,12 @@ async function poll() {
       for (const ln of s.new_log) appendLog(ln);
     }
 
-    if (wizardStep === 4) {
+    if (wizardStep === 5) {
       const done = norm === "finished" || norm === "error" || norm === "stopped";
       el("btnStop").disabled = norm !== "running";
       el("btnCopyLog").disabled = false;
       el("btnBackAfterDone").hidden = !done;
-      el("wizTab4").disabled = false;
+      el("wizTab5").disabled = false;
       if (prevPollState === "running" && done) {
         showToast(norm === "finished" ? "Export finished." : `Export ended: ${norm}`, norm === "finished" ? "info" : "error");
       }
@@ -676,11 +853,11 @@ async function poll() {
 }
 
 async function startExport() {
-  if (!lastPreflightOk) return showToast("Verify your recording first (step 1).", "error");
+  if (!lastPreflightOk) return showToast("Verify your recording first.", "error");
   const opts = gatherOptions();
 
-  wizardGo(4);
-  el("wizTab4").disabled = false;
+  wizardGo(5);
+  el("wizTab5").disabled = false;
   el("btnBackAfterDone").hidden = true;
 
   el("log").textContent = "";
@@ -703,7 +880,7 @@ async function startExport() {
   } catch (e) {
     appendLog(`Start failed: ${e}`);
     showToast(String(e), "error");
-    wizardGo(3);
+    wizardGo(4);
   }
 }
 
@@ -824,11 +1001,32 @@ el("fileFolderInput").addEventListener("change", async () => {
 el("btnPreflight").addEventListener("click", () => runPreflight({ toastOk: false }));
 el("btnPastePath").addEventListener("click", pastePath);
 
-el("btnToSettings").addEventListener("click", advanceFromStep1);
+// Upload (panel 2) → Materials (panel 3)
+el("btnToMaterials").addEventListener("click", advanceFromUploadToMaterials);
 
 el("btnBackToDownload").addEventListener("click", () => wizardGo(1));
 
-el("btnBackToUpload").addEventListener("click", () => wizardGo(2));
+// Materials panel: back to Upload, then forward to Settings.
+el("btnBackFromMaterials").addEventListener("click", () => wizardGo(2));
+el("btnToSettings").addEventListener("click", () => {
+  wizardGo(4);
+  refreshSystemOnly();
+});
+
+// Materials list click delegation (Attach / Replace / Remove).
+el("materialsList").addEventListener("click", onMaterialsListClick);
+el("materialFileInput").addEventListener("change", async () => {
+  const f = el("materialFileInput").files?.[0];
+  el("materialFileInput").value = "";
+  if (f) await uploadMaterial(f);
+  else pendingMaterialUpload = null;
+});
+
+// Settings panel: back to Materials.
+el("btnBackToMaterials").addEventListener("click", () => {
+  wizardGo(3);
+  refreshMaterials();
+});
 
 el("btnReplaceSession").addEventListener("click", () => {
   el("folder").value = "";
@@ -842,7 +1040,7 @@ el("btnStop").addEventListener("click", stopExport);
 el("btnCopyLog").addEventListener("click", copyLog);
 
 el("btnBackAfterDone").addEventListener("click", () => {
-  wizardGo(3);
+  wizardGo(4);
   el("btnBackAfterDone").hidden = true;
   showToast('Ready to tweak settings — click "Start export" again.', "info");
 });
@@ -852,10 +1050,15 @@ el("wizTab2").addEventListener("click", () => wizardGo(2));
 el("wizTab3").addEventListener("click", () => {
   if (!lastPreflightOk) return;
   wizardGo(3);
-  refreshSystemOnly();
+  refreshMaterials();
 });
 el("wizTab4").addEventListener("click", () => {
-  if (wizardStep === 4) return;
+  if (!lastPreflightOk) return;
+  wizardGo(4);
+  refreshSystemOnly();
+});
+el("wizTab5").addEventListener("click", () => {
+  if (wizardStep === 5) return;
 });
 
 el("presetFast").addEventListener("click", () => applyPresetBtn("fast"));

@@ -31,11 +31,15 @@
         </button>
         <span class="wizJoin" aria-hidden="true"></span>
         <button type="button" class="wizStep" id="wizTab3" data-step="3" disabled>
-          <span class="wizN">3</span><span class="wizT">Settings</span>
+          <span class="wizN">3</span><span class="wizT">Materials</span>
         </button>
         <span class="wizJoin" aria-hidden="true"></span>
         <button type="button" class="wizStep" id="wizTab4" data-step="4" disabled>
-          <span class="wizN">4</span><span class="wizT">Export</span>
+          <span class="wizN">4</span><span class="wizT">Settings</span>
+        </button>
+        <span class="wizJoin" aria-hidden="true"></span>
+        <button type="button" class="wizStep" id="wizTab5" data-step="5" disabled>
+          <span class="wizN">5</span><span class="wizT">Export</span>
         </button>
       </nav>
 
@@ -108,13 +112,37 @@
 
           <div class="wizActions">
             <button type="button" class="btn ghost" id="btnBackToDownload">← Back</button>
-            <button type="button" class="btn primary" id="btnToSettings" disabled>Next: Settings →</button>
+            <button type="button" class="btn primary" id="btnToMaterials" disabled>Next: Materials →</button>
           </div>
         </section>
       </div>
 
-      <!-- —— Step 3: settings —— -->
+      <!-- —— Step 3: materials (attach the shared PDFs) —— -->
       <div id="panel3" class="wizardPanel" hidden>
+        <section class="card pickCard">
+          <h2 class="wizHeading">Attach the shared PDFs (optional)</h2>
+          <p class="mutedP" style="margin-top: 6px">
+            We detected the documents below in the recording. Attaching the original PDF lets us render the matching page
+            as a real overlay during export. Without it we’ll just show a small text marker. <em>(Skip is fine — you can always come back.)</em>
+          </p>
+
+          <div id="materialsRendererInfo" class="mutedP" style="margin-top: 10px" hidden></div>
+
+          <div id="materialsList" class="materialsList" aria-live="polite">
+            <div class="materialsEmpty mono">Loading detected documents…</div>
+          </div>
+
+          <input type="file" id="materialFileInput" accept="application/pdf,.pdf" hidden />
+
+          <div class="wizActions">
+            <button type="button" class="btn ghost" id="btnBackFromMaterials">← Back</button>
+            <button type="button" class="btn primary" id="btnToSettings">Next: Settings →</button>
+          </div>
+        </section>
+      </div>
+
+      <!-- —— Step 4: settings —— -->
+      <div id="panel4" class="wizardPanel" hidden>
         <div class="sessionBar">
           <div class="sessionBarText">
             <div class="sessionLabel">Recording</div>
@@ -265,13 +293,13 @@
         </section>
 
         <div class="wizActions spaced">
-          <button type="button" class="btn ghost" id="btnBackToUpload">← Back</button>
+          <button type="button" class="btn ghost" id="btnBackToMaterials">← Back</button>
           <button type="button" class="btn primary bigbtn" id="btnStartExport" disabled>Start export →</button>
         </div>
       </div>
 
-      <!-- —— Step 4: progress —— -->
-      <div id="panel4" class="wizardPanel" hidden>
+      <!-- —— Step 5: progress —— -->
+      <div id="panel5" class="wizardPanel" hidden>
         <section class="card progCard">
           <h2 class="wizHeading">Encoding in progress</h2>
           <p id="progOutpath" class="mono mutedPath"></p>
