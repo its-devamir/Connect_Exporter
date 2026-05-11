@@ -83,9 +83,13 @@ How to run
      $Name.exe
      bin\ffmpeg.exe   (and bin\ffprobe.exe)
 2. Double-click START_HERE.bat (or $Name.exe).
-3. A browser tab opens at http://127.0.0.1:8765 - use the 4-step wizard:
-     Download URL -> Upload -> Settings -> Export.
+3. A browser tab opens at http://127.0.0.1:8765 - use the 5-step wizard:
+     Download URL -> Upload -> Materials (optional PDFs) -> Settings -> Export.
 4. Final MP4 lands in your Videos\ConnectExports folder by default.
+
+Tip: If you happen to have the original PDF files that were shared in the
+meeting, drop them into step 3 ("Materials") to render the real pages on
+top of the screen instead of a plain "<filename>.pdf is being shown" tag.
 
 Notes
 - First launch may take a few seconds; Windows Defender may scan the exe once.
